@@ -1,3 +1,0 @@
-# the yuniverse.
-
-🌐 Web Site.
