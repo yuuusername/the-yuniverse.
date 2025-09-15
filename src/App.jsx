@@ -3,6 +3,8 @@ import Dither from './Dither';
 import './App.css';
 
 export default function App() {
+  const isMobile = useMemo(() => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent), []);
+  const colorSteps = isMobile ? 5 : 2;
   return (
     <div className="app">
       <div className="layer">
@@ -11,7 +13,7 @@ export default function App() {
           disableAnimation={false}
           enableMouseInteraction={true}
           mouseRadius={0.3}
-          colorNum={2}
+          colorNum={colorSteps}
           waveAmplitude={0.3}
           waveFrequency={0}
           waveSpeed={0.04}
