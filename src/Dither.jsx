@@ -192,11 +192,41 @@ function DitheredWaves({
   pixelSize,
   disableAnimation,
   enableMouseInteraction,
-  mouseRadius
+  mouseRadius,
+  emulateOffscreen = true,
+  dampingPerSecond = 0.90,
+  offscreenStopDistancePx = 500,
+  maxSpeedPxPerSec = 5000
 }) {
   const mesh = useRef(null);
   const mouseRef = useRef(new THREE.Vector2());
+  const pointerInsideRef = useRef(false);
+  const windowActiveRef = useRef(true);
+
+  const simRef = useRef({
+    active: false,
+    pos: new THREE.Vector2(),
+    vel: new THREE.Vector2(),
+    t: 0,
+    lastT: 0,
+  });
+
+  const lastMoveRef = useRef({ t: 0, pos: new THREE.Vector2() });
   const { viewport, size, gl } = useThree();
+
+  useEffect(() => {
+    const onFocus = () => (windowActiveRef.current = true);
+    const onBlur = () => (windowActiveRef.current = false);
+    const onVis = () => (windowActiveRef.current = !document.hidden);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
 
   const waveUniformsRef = useRef({
     time: new THREE.Uniform(0),
@@ -212,21 +242,16 @@ function DitheredWaves({
 
   useEffect(() => {
     const dpr = gl.getPixelRatio();
-    const w = Math.floor(size.width * dpr),
-      h = Math.floor(size.height * dpr);
+    const w = Math.floor(size.width * dpr), h = Math.floor(size.height * dpr);
     const res = waveUniformsRef.current.resolution.value;
-    if (res.x !== w || res.y !== h) {
-      res.set(w, h);
-    }
+    if (res.x !== w || res.y !== h) res.set(w, h);
   }, [size, gl]);
 
   const prevColor = useRef([...waveColor]);
+
   useFrame(({ clock }) => {
     const u = waveUniformsRef.current;
-
-    if (!disableAnimation) {
-      u.time.value = clock.getElapsedTime();
-    }
+    if (!disableAnimation) u.time.value = clock.getElapsedTime();
 
     if (u.waveSpeed.value !== waveSpeed) u.waveSpeed.value = waveSpeed;
     if (u.waveFrequency.value !== waveFrequency) u.waveFrequency.value = waveFrequency;
@@ -237,19 +262,103 @@ function DitheredWaves({
       prevColor.current = [...waveColor];
     }
 
-    u.enableMouseInteraction.value = enableMouseInteraction ? 1 : 0;
+    const now = clock.getElapsedTime();
+    const dpr = gl.getPixelRatio();
+    const res = u.resolution.value;
+
+    if (emulateOffscreen && simRef.current.active) {
+      const now = clock.getElapsedTime();
+      const dt = Math.max(0, now - (simRef.current.lastT || now));
+      simRef.current.lastT = now;
+      simRef.current.t += dt;
+
+      const damping = Math.pow(dampingPerSecond, dt);
+      simRef.current.vel.multiplyScalar(damping);
+
+      simRef.current.pos.addScaledVector(simRef.current.vel, dt);
+
+      const res = u.resolution.value;
+      const x = simRef.current.pos.x;
+      const y = simRef.current.pos.y;
+
+      const dx = x < 0 ? -x : (x > res.x ? x - res.x : 0);
+      const dy = y < 0 ? -y : (y > res.y ? y - res.y : 0);
+      const dist = Math.hypot(dx, dy);
+
+      const speed = simRef.current.vel.length();
+
+      if (dist > offscreenStopDistancePx || speed < 5) {
+        simRef.current.active = false;
+      }
+    }
+
+    const haveRealPointer =
+      enableMouseInteraction && pointerInsideRef.current && windowActiveRef.current;
+
+    const haveSimulatedPointer =
+      enableMouseInteraction && emulateOffscreen && simRef.current.active && windowActiveRef.current;
+
+    const shouldEnable = haveRealPointer || haveSimulatedPointer;
+
+    u.enableMouseInteraction.value = shouldEnable ? 1 : 0;
     u.mouseRadius.value = mouseRadius;
 
-    if (enableMouseInteraction) {
-      u.mousePos.value.copy(mouseRef.current);
+    if (shouldEnable) {
+      if (haveRealPointer) {
+        u.mousePos.value.copy(mouseRef.current);
+      } else {
+        u.mousePos.value.copy(simRef.current.pos);
+      }
     }
   });
 
-  const handlePointerMove = e => {
+  const handlePointerMove = (e) => {
     if (!enableMouseInteraction) return;
     const rect = gl.domElement.getBoundingClientRect();
     const dpr = gl.getPixelRatio();
-    mouseRef.current.set((e.clientX - rect.left) * dpr, (e.clientY - rect.top) * dpr);
+    const x = (e.clientX - rect.left) * dpr;
+    const y = (e.clientY - rect.top) * dpr;
+
+    const now = performance.now() * 0.001; // s
+    const last = lastMoveRef.current;
+
+    mouseRef.current.set(x, y);
+
+    if (last.t) {
+      const dt = Math.max(1e-3, now - last.t);
+      const vx = (x - last.pos.x) / dt;
+      const vy = (y - last.pos.y) / dt;
+      const v = new THREE.Vector2(vx, vy);
+
+      if (v.length() > maxSpeedPxPerSec) v.setLength(maxSpeedPxPerSec);
+
+      const alpha = 0.35;
+      simRef.current.vel.lerp(v, alpha);
+    } else {
+      simRef.current.vel.set(0, 0);
+    }
+
+    lastMoveRef.current = { t: now, pos: new THREE.Vector2(x, y) };
+
+    simRef.current.pos.set(x, y);
+  };
+
+  const handlePointerEnter = () => {
+    pointerInsideRef.current = true;
+    simRef.current.active = false;
+    simRef.current.t = 0;
+  };
+
+  const handlePointerLeave = () => {
+    pointerInsideRef.current = false;
+    if (emulateOffscreen && windowActiveRef.current) {
+      simRef.current.active = true;
+      simRef.current.t = 0;
+      simRef.current.lastT = 0;
+      if (!isFinite(simRef.current.vel.x) || !isFinite(simRef.current.vel.y)) {
+        simRef.current.vel.set(0, 0);
+      }
+    }
   };
 
   return (
@@ -269,6 +378,8 @@ function DitheredWaves({
 
       <mesh
         onPointerMove={handlePointerMove}
+        onPointerEnter={handlePointerEnter}
+        onPointerLeave={handlePointerLeave}
         position={[0, 0, 0.01]}
         scale={[viewport.width, viewport.height, 1]}
         visible={false}
@@ -279,6 +390,7 @@ function DitheredWaves({
     </>
   );
 }
+
 
 export default function Dither({
   waveSpeed = 0.05,
