@@ -23,4 +23,18 @@ body { background: #000000; font-family: Arial, Helvetica, sans-serif; }
   font-weight: 600;
   line-height: .95;
   pointer-events: none;
+  user-select: none;
+}
+
+.small-message {
+  position: absolute;
+  bottom: 5vh;
+  right: 5vw;
+  margin: 0;
+  color: #000000;
+  font-size: clamp(1rem, 3vw, 2rem);
+  font-weight: 400;
+  line-height: .95;
+  pointer-events: none;
+  user-select: none;
 }

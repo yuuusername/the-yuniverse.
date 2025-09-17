@@ -5,8 +5,8 @@ import './App.css';
 
 export default function App() {
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  const colorSteps = isMobile ? 5 : 2;
-  const waveColor = isMobile ? [0.3, 0.3, 0.3] : [0, 0, 0];
+  const colorSteps = isMobile ? 4 : 2;
+  const waveColor = isMobile ? [0.3, 0.3, 0.3] : [0.2, 0.2, 0.2];
   return (
     <div className="app">
       <div className="layer">
@@ -22,6 +22,7 @@ export default function App() {
         />
       </div>
       <h1 className="title">the yuniverse.</h1>
+      <h4 className="small-message">first to use discord link:「yannblu」</h4>
     </div>
   );
 }
